@@ -1,0 +1,3 @@
+# This file ensures the debug/output directory is tracked by git
+# The directory is needed for debug output files but the files themselves
+# are excluded by .gitignore to avoid committing large binary files

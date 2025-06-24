@@ -1,0 +1,19 @@
+# SoFixer Python版本依赖
+# 
+# 核心Python库（通常已内置）
+# - ctypes: C类型绑定，用于ELF结构定义
+# - mmap: 内存映射文件读取
+# - struct: 二进制数据打包/解包
+# - logging: 日志记录
+# - argparse: 命令行参数解析
+# - os, sys: 系统操作
+# - typing: 类型注解支持
+
+# 可选的开发和测试依赖
+pytest>=6.0.0        # 测试框架
+pytest-cov>=2.10.0   # 测试覆盖率
+black>=21.0.0         # 代码格式化
+flake8>=3.8.0         # 代码检查
+
+# 文档生成（可选）
+sphinx>=4.0.0         # 文档生成工具

@@ -1,0 +1,38 @@
+{
+    "python.defaultInterpreterPath": "/usr/bin/python3",
+    "python.analysis.extraPaths": [
+        "./src"
+    ],
+    "python.analysis.autoSearchPaths": true,
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    "python.linting.flake8Args": [
+        "--max-line-length=120",
+        "--ignore=E501,W503"
+    ],
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": [
+        "--line-length=120"
+    ],
+    "files.associations": {
+        "*.so": "plaintext",
+        "*.elf": "plaintext"
+    },
+    "explorer.fileNesting.enabled": true,
+    "explorer.fileNesting.patterns": {
+        "*.py": "${capture}.pyc",
+        "*.so": "${capture}.id0,${capture}.id1,${capture}.id2,${capture}.nam,${capture}.til,${capture}.i64"
+    },
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true,
+        "**/*.pyo": true,
+        "**/*.id0": false,
+        "**/*.id1": false,
+        "**/*.id2": false,
+        "**/*.nam": false,
+        "**/*.til": false,
+        "**/*.i64": false
+    }
+}

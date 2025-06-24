@@ -1,0 +1,116 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "SoFixer Debug - Basic",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.sofixer.main",
+            "args": [
+                "-s", "debug/samples/libjiagu_64.so_0x7a1301e000_0x27e000.so",
+                "-o", "debug/output/libjiagu_fixed_debug.so",
+                "-m", "0x7a1301e000",
+                "-d"
+            ],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "stopOnEntry": false,
+            "python": "/usr/bin/python3"
+        },
+        {
+            "name": "SoFixer Debug - With Base SO",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.sofixer.main",
+            "args": [
+                "-s", "debug/samples/libjiagu_64.so_0x7a1301e000_0x27e000.so",
+                "-o", "debug/output/libjiagu_fixed_with_base.so",
+                "-m", "0x7a1301e000",
+                "-b", "debug/samples/libjiagu_fixed.so",
+                "-d"
+            ],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "stopOnEntry": false,
+            "python": "/usr/bin/python3"
+        },
+        {
+            "name": "Check Segments Tool",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tools/check_segments.py",
+            "args": [
+                "debug/samples/libjiagu_fixed.so",
+                "debug/output/libjiagu_fixed_debug.so"
+            ],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false,
+            "python": "/usr/bin/python3"
+        },
+        {
+            "name": "Validate Fix Tool",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/validate_fix.py",
+            "args": [
+                "debug/samples/libjiagu_64.so_0x7a1301e000_0x27e000.so",
+                "0x7a1301e000"
+            ],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "stopOnEntry": false,
+            "python": "/usr/bin/python3"
+        },
+        {
+            "name": "Debug Section Headers",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tools/debug_section_headers.py",
+            "args": [
+                "debug/output/libjiagu_fixed_debug.so"
+            ],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false,
+            "python": "/usr/bin/python3"
+        },
+        {
+            "name": "Debug ELF Reader",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.sofixer.elf_reader",
+            "args": [],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "stopOnEntry": true,
+            "python": "/usr/bin/python3"
+        },
+        {
+            "name": "Debug ELF Rebuilder",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.sofixer.elf_rebuilder",
+            "args": [],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "stopOnEntry": true,
+            "python": "/usr/bin/python3"
+        }
+    ]
+}

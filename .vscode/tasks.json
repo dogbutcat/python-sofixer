@@ -1,0 +1,120 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run SoFixer - Basic Test",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m", "src.sofixer.main",
+                "-s", "debug/samples/libjiagu_64.so_0x7a1301e000_0x27e000.so",
+                "-o", "debug/output/test_basic.so",
+                "-m", "0x7a1301e000",
+                "-d"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Debug Script",
+            "type": "shell",
+            "command": "python",
+            "args": ["debug/debug_script.py"],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Check Segments Comparison",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "tools/check_segments.py",
+                "debug/samples/libjiagu_fixed.so",
+                "debug/output/test_basic.so"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [],
+            "dependsOn": "Run SoFixer - Basic Test"
+        },
+        {
+            "label": "Validate Fix",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "tests/validate_fix.py",
+                "debug/samples/libjiagu_64.so_0x7a1301e000_0x27e000.so",
+                "0x7a1301e000"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean Debug Output",
+            "type": "shell",
+            "command": "rm",
+            "args": ["-rf", "debug/output/*"],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Install Package (Development)",
+            "type": "shell",
+            "command": "pip",
+            "args": ["install", "-e", "."],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run All Tests",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Run SoFixer - Basic Test",
+                "Check Segments Comparison",
+                "Validate Fix"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        }
+    ]
+}
