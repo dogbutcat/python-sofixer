@@ -741,7 +741,7 @@ class ELFRebuilder:
             shdr['sh_flags'] = 0x2  # SHF_ALLOC
             shdr['sh_addr'] = self.so_info.rel_offset + min_vaddr
             shdr['sh_offset'] = shdr['sh_addr']
-            rel_size = 0x18 if self.elf_reader.is_64bit else 0x8
+            rel_size = ctypes.sizeof(self.elf_reader.types['Rel'])
             shdr['sh_size'] = self.so_info.rel_count * rel_size
             shdr['sh_link'] = self.section_indices['DYNSYM']
             shdr['sh_info'] = 0
@@ -778,14 +778,14 @@ class ELFRebuilder:
             shdr = self._create_section_header()
             if self.so_info.plt_type == DynamicTag.DT_REL:
                 shdr['sh_name'] = self._add_section_name(".rel.plt")
+                shdr['sh_type'] = SectionType.SHT_REL
                 rel_size = ctypes.sizeof(self.elf_reader.types['Rel'])
             else:
                 shdr['sh_name'] = self._add_section_name(".rela.plt")
+                shdr['sh_type'] = SectionType.SHT_RELA
                 rel_size = ctypes.sizeof(self.elf_reader.types['Rela'])
                 
-            # 修复：C++代码在line 188有bug，总是设置为SHT_REL，我们保持与C++一致
-            shdr['sh_type'] = SectionType.SHT_REL  # 对应C++ shdr.sh_type = SHT_REL
-                
+            # shdr['sh_type'] = SectionType.SHT_REL
             shdr['sh_flags'] = 0x2  # SHF_ALLOC
             shdr['sh_addr'] = self.so_info.plt_rel_offset + min_vaddr
             shdr['sh_offset'] = shdr['sh_addr']
@@ -973,8 +973,8 @@ class ELFRebuilder:
         shdr['sh_name'] = self._add_section_name(".shstrtab")
         shdr['sh_type'] = SectionType.SHT_STRTAB
         shdr['sh_flags'] = 0
-        shdr['sh_addr'] = self.so_info.max_load
-        shdr['sh_offset'] = self.so_info.max_load
+        shdr['sh_addr'] = 0 # 不加载到内存，虚拟地址为0
+        shdr['sh_offset'] = 0 # 等下在_rebuild_final_file中计算
         shdr['sh_size'] = len(self.shstrtab)
         shdr['sh_link'] = 0
         shdr['sh_info'] = 0
@@ -994,7 +994,7 @@ class ELFRebuilder:
         
         # 步骤18: 计算段大小
         self._calculate_section_sizes()
-        
+
         logger.debug("=======================RebuildShdr End=========================")
         logger.info(f"Successfully rebuilt {len(self.section_headers)} section headers")
         return True
@@ -1636,6 +1636,10 @@ class ELFRebuilder:
             # auto shdr_off = load_size + shstrtab.length()
             # memcpy(rebuild_data + (int)shdr_off, (void*)&shdrs[0], shdrs.size() * sizeof(Elf_Shdr))
             shdr_offset = adjusted_load_size + shstrtab_size
+
+            # 修复：SHSTRTAB中的sh_offset并没有赋值更新
+            self.section_headers[self.section_indices['SHSTRTAB']]['sh_offset'] = shstrtab_offset
+
             self._serialize_section_headers(shdr_offset)
             logger.debug(f"Appended section headers at offset 0x{shdr_offset:x} (size: 0x{shdrs_total_size:x})")
             

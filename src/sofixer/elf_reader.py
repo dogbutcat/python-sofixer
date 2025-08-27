@@ -282,7 +282,13 @@ class ELFReader:
                 
                 logger.debug(f"Program header {i}: type={phdr.p_type}, "
                            f"vaddr=0x{phdr.p_vaddr:x}, memsz=0x{phdr.p_memsz:x}")
-            
+
+            # ==========================================================
+            # 新增代码：保存一份原始程序头的深拷贝，用于文件重构
+            import copy
+            self.original_program_headers = copy.deepcopy(self.program_headers)
+            # ==========================================================
+
             logger.info(f"Read {len(self.program_headers)} program headers")
             return True
             
@@ -858,6 +864,83 @@ class ObfuscatedELFReader(ELFReader):
         """设置原始（未转储）SO文件的路径"""
         self.base_so_path = path
         logger.info(f"Set base SO path: {path}")
+
+    def load_segments(self) -> bool:
+        """
+        [重写] 为混淆/转储的SO文件定制的、带条件判断的段加载逻辑。
+        由于自linker加固的so在计算vaddr时可能会出现segment边界溢出，所以在修复LOAD的时候增加Flag
+        当检测到溢出时，执行新的转储，即加载到新的一块内存区域中用于临时保存，后续修复。
+        
+        该方法会检查 self.is_self_link 标志：
+        - 如果为 False (常规dump文件), 则调用父类的原始加载方法，保证原有功能不变。
+        - 如果为 True (特殊dump文件), 则启用新的加载逻辑，安全地处理文件与内存布局不一致的情况。
+        """
+        # 关键的判断：检查是否需要启用特殊加载逻辑
+        if not hasattr(self, 'is_self_link') or not self.is_self_link:
+            # 这是常规情况，直接调用父类的、您原来的正常逻辑
+            logger.info("这是一个常规转储文件，使用标准段加载器。")
+            return super().load_segments()
+
+        # --- 以下是仅在 is_self_link == True 时才会执行的特殊逻辑 ---
+        logger.info("检测到自链接器特征，使用专用段加载器。")
+        
+        # 1. 使用修复后的 program_headers 计算内存布局
+        min_vaddr, max_vaddr, load_size = self.calculate_load_size()
+        
+        if load_size == 0:
+            logger.error("根据修复后的程序头，未找到可加载的段")
+            return False
+            
+        self.load_bias = -min_vaddr
+        self.loaded_data = bytearray(load_size)
+        
+        logger.info(f"正在加载段到 {load_size} 字节的缓冲区 "
+                   f"(虚拟地址范围: 0x{min_vaddr:x} - 0x{max_vaddr:x})")
+        
+        # 2. 遍历并加载数据
+        repaired_load_segments = [p for p in self.program_headers if p.p_type == SegmentType.PT_LOAD]
+        original_load_segments = [p for p in self.original_program_headers if p.p_type == SegmentType.PT_LOAD]
+
+        if len(repaired_load_segments) != len(original_load_segments):
+            logger.error("原始和修复后的可加载段数量不匹配。")
+            return False
+
+        for repaired_phdr, original_phdr in zip(repaired_load_segments, original_load_segments):
+            
+            # a) 计算在内存缓冲区中的写入位置 (使用修复后的头)
+            seg_start_in_mem = repaired_phdr.p_vaddr - min_vaddr
+            
+            # b) 确定从原始文件中读取的位置和大小 (使用原始头)
+            read_offset = original_phdr.p_offset
+            read_size = original_phdr.p_filesz
+
+            if read_size == 0:
+                continue
+
+            # c) 安全检查：确保读取不会越界原始文件
+            if read_offset + read_size > self.file_size:
+                logger.warning(f"段读取请求 (偏移=0x{read_offset:x}, 大小=0x{read_size:x}) "
+                               f"超出原始文件大小 (0x{self.file_size:x})。将截断读取。")
+                read_size = self.file_size - read_offset
+                if read_size <= 0:
+                    continue
+            
+            # d) 安全检查：确保写入不会越界内存缓冲区
+            seg_end_in_mem = seg_start_in_mem + read_size
+            if seg_end_in_mem > load_size:
+                logger.error(f"段写入 (内存偏移=0x{seg_start_in_mem:x}, 大小=0x{read_size:x}) "
+                             f"将超出已分配的内存缓冲区 (0x{load_size:x})。")
+                return False
+
+            # e) 执行数据复制
+            segment_data = self.mmap_file[read_offset : read_offset + read_size]
+            self.loaded_data[seg_start_in_mem : seg_end_in_mem] = segment_data
+
+            logger.debug(f"已加载段: 文件[0x{read_offset:x}:0x{read_offset+read_size:x}] "
+                       f"-> 内存[0x{seg_start_in_mem:x}:0x{seg_end_in_mem:x}]")
+
+        logger.info("所有段已通过专用加载器成功加载到内存缓冲区")
+        return True
     
     def fix_dump_program_headers(self):
         """修复内存转储特征的程序头 - 完全对应C++的FixDumpSoPhdr()"""
@@ -892,12 +975,21 @@ class ObfuscatedELFReader(ELFReader):
                         # 设置段大小到下一个段的开始
                         next_phdr = load_segments[i + 1]
                         phdr.p_memsz = next_phdr.p_vaddr - phdr.p_vaddr
+                        # 在内存转储中，文件大小等于内存大小
+                        phdr.p_filesz = phdr.p_memsz
                     else:
-                        # 最后一个段：设置到文件末尾
-                        phdr.p_memsz = self.file_size - phdr.p_vaddr
-                    
-                    # 在内存转储中，文件大小等于内存大小
-                    phdr.p_filesz = phdr.p_memsz
+                        # 最后一个段的处理 - 关键修复点
+                        calculated_size = self.file_size - phdr.p_vaddr
+                        
+                        if calculated_size <= 0:
+                            # 对于自链接器文件，保持原有大小或使用合理的默认值
+                            logger.warning(f"检测到自链接器文件特征: file_size(0x{self.file_size:x}) <= vaddr(0x{phdr.p_vaddr:x})")
+                            self.is_self_link = True
+                            phdr.p_memsz = phdr.p_memsz
+                            logger.info(f"保持最后段原有大小: memsz=0x{phdr.p_memsz:x}")
+                        else:
+                            phdr.p_memsz = calculated_size
+                            phdr.p_filesz = phdr.p_memsz
                     
                     logger.debug(f"修复段{i}大小: memsz=0x{phdr.p_memsz:x}, filesz=0x{phdr.p_filesz:x}")
         
