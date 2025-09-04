@@ -717,7 +717,7 @@ class ELFRebuilder:
             shdr = self._create_section_header()
             shdr['sh_name'] = self._add_section_name(".hash")
             shdr['sh_type'] = SectionType.SHT_HASH
-            # 注意：C++版本没有设置sh_flags，保持为0以匹配C++行为
+            shdr['sh_flags'] = 0x2  # SHF_ALLOC
             shdr['sh_addr'] = self.so_info.hash_offset + min_vaddr  # 直接使用hash_offset（对应C++的si.hash）
             shdr['sh_offset'] = shdr['sh_addr']
             # hash表大小 = 2个Elf_Addr头 + nbucket*Elf_Addr + nchain*Elf_Addr (对应C++的sizeof(Elf_Addr))
@@ -785,7 +785,7 @@ class ELFRebuilder:
                 shdr['sh_type'] = SectionType.SHT_RELA
                 rel_size = ctypes.sizeof(self.elf_reader.types['Rela'])
                 
-            # shdr['sh_type'] = SectionType.SHT_REL
+            shdr['sh_type'] = SectionType.SHT_REL # calculated plt_rel_count from plt_type as DT_REL
             shdr['sh_flags'] = 0x2  # SHF_ALLOC
             shdr['sh_addr'] = self.so_info.plt_rel_offset + min_vaddr
             shdr['sh_offset'] = shdr['sh_addr']
@@ -973,8 +973,8 @@ class ELFRebuilder:
         shdr['sh_name'] = self._add_section_name(".shstrtab")
         shdr['sh_type'] = SectionType.SHT_STRTAB
         shdr['sh_flags'] = 0
-        shdr['sh_addr'] = 0 # 不加载到内存，虚拟地址为0
-        shdr['sh_offset'] = 0 # 等下在_rebuild_final_file中计算
+        shdr['sh_addr'] = self.so_info.max_load
+        shdr['sh_offset'] = self.so_info.max_load # 等下在_rebuild_final_file中计算
         shdr['sh_size'] = len(self.shstrtab)
         shdr['sh_link'] = 0
         shdr['sh_info'] = 0
@@ -1105,23 +1105,8 @@ class ELFRebuilder:
         """
         logger.debug("Calculating section sizes...")
         
-        # 按照排序后的顺序计算段大小
-        # 对于size=0的段，使用下一个段的地址减去当前段地址
-        for i in range(len(self.section_headers) - 1):
-            current_shdr = self.section_headers[i]
-            next_shdr = self.section_headers[i + 1]
-            
-            # 如果当前段大小为0，计算到下一个段的大小
-            # 注意：跳过空段（索引0），它应该保持大小为0
-            if (i > 0 and current_shdr['sh_size'] == 0 and current_shdr['sh_type'] != 8):  # SHT_NOBITS
-                # 确保地址有效且合理
-                if (next_shdr['sh_addr'] > current_shdr['sh_addr'] and 
-                    next_shdr['sh_addr'] - current_shdr['sh_addr'] < 0x100000):  # 1MB限制，防止异常
-                    current_shdr['sh_size'] = next_shdr['sh_addr'] - current_shdr['sh_addr']
-                    logger.debug(f"Calculated section {i} size: 0x{current_shdr['sh_size']:x}")
-        
         # 特殊处理.dynsym段大小（对应C++中的计算逻辑）
-        if self.section_indices['DYNSYM'] > 0:
+        if self.section_indices['DYNSYM'] != 0:
             dynsym_idx = self.section_indices['DYNSYM']
             if (dynsym_idx + 1 < len(self.section_headers) and 
                 self.section_headers[dynsym_idx]['sh_size'] == 0):
@@ -1132,7 +1117,7 @@ class ELFRebuilder:
                     logger.debug(f"Calculated .dynsym size: 0x{self.section_headers[dynsym_idx]['sh_size']:x}")
         
         # 特殊处理.text&ARM.extab段大小（对应C++中的计算逻辑）
-        if self.section_indices['TEXTTAB'] > 0:
+        if self.section_indices['TEXTTAB'] != 0:
             texttab_idx = self.section_indices['TEXTTAB']
             if (texttab_idx + 1 < len(self.section_headers) and 
                 self.section_headers[texttab_idx]['sh_size'] == 0):
@@ -1143,20 +1128,14 @@ class ELFRebuilder:
                     logger.debug(f"Calculated .text&ARM.extab size: 0x{self.section_headers[texttab_idx]['sh_size']:x}")
         
         # 确保没有段重叠问题
-        for i in range(1, len(self.section_headers)):
-            prev_shdr = self.section_headers[i-1]
-            curr_shdr = self.section_headers[i]
+        for i in range(2, len(self.section_headers)):
+            if (self.section_headers[i]['sh_offset'] - self.section_headers[i-1]['sh_offset'] 
+                < self.section_headers[i-1]['sh_size']):
+                self.section_headers[i-1]['sh_size'] = (
+                    self.section_headers[i]['sh_offset'] - self.section_headers[i-1]['sh_offset']
+                )
+                logger.debug(f"Adjusted section {i-1} size to avoid overlap: 0x{self.section_headers[i-1]['sh_size']:x}")
             
-            # 检查前一个段是否与当前段重叠
-            prev_end = prev_shdr['sh_addr'] + prev_shdr['sh_size']
-            if (prev_end > curr_shdr['sh_addr'] and 
-                prev_shdr['sh_type'] != 8 and curr_shdr['sh_type'] != 8):  # 排除SHT_NOBITS
-                # 调整前一个段的大小以避免重叠
-                new_size = curr_shdr['sh_addr'] - prev_shdr['sh_addr']
-                if new_size > 0:
-                    prev_shdr['sh_size'] = new_size
-                    logger.debug(f"Adjusted section {i-1} size to avoid overlap: 0x{prev_shdr['sh_size']:x}")
-        
         logger.debug("Section sizes calculated successfully")
     
     def _rebuild_relocations(self) -> bool:
@@ -1736,10 +1715,11 @@ class ELFRebuilder:
             new_header.e_type = ELFType.ET_DYN                    # ehdr.e_type = ET_DYN
             
             # 设置正确的机器类型 
-            if self.elf_reader.is_64bit:
-                new_header.e_machine = 183                        # ARM64 (AArch64) 
-            else:
-                new_header.e_machine = 40                         # ARM32
+            new_header.e_machine = current_header.e_machine
+            # if self.elf_reader.is_64bit:
+            #     new_header.e_machine = 183                        # ARM64 (AArch64) 
+            # else:
+            #     new_header.e_machine = 40                         # ARM32
                 
             new_header.e_shnum = len(self.section_headers)        # ehdr.e_shnum = shdrs.size()
             new_header.e_shoff = shdr_offset                      # ehdr.e_shoff = (Elf_Addr)shdr_off
