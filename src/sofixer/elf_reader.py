@@ -951,47 +951,46 @@ class ObfuscatedELFReader(ELFReader):
         logger.info(f"Fixing program headers for memory dump (base_addr=0x{self.dump_base_addr:x})...")
         
         # 第一阶段：修复可加载段大小 - 对应C++的第一部分逻辑
-        if self.dump_base_addr != 0:
-            # 收集所有可加载段
-            load_segments = []
-            for phdr in self.program_headers:
-                if phdr.p_type == SegmentType.PT_LOAD:
-                    load_segments.append(phdr)
-            
-            # 按虚拟地址排序
-            load_segments.sort(key=lambda p: p.p_vaddr)
-            
-            logger.debug("修复前的可加载段:")
-            for i, phdr in enumerate(load_segments):
-                logger.debug(f"  段{i}: vaddr=0x{phdr.p_vaddr:x}, offset=0x{phdr.p_offset:x}, "
-                            f"filesz=0x{phdr.p_filesz:x}, memsz=0x{phdr.p_memsz:x}")
-            
-            # 修复每个可加载段的大小
-            if load_segments:
-                for i in range(len(load_segments)):
-                    phdr = load_segments[i]
+        # 收集所有可加载段
+        load_segments = []
+        for phdr in self.program_headers:
+            if phdr.p_type == SegmentType.PT_LOAD:
+                load_segments.append(phdr)
+        
+        # 按虚拟地址排序
+        load_segments.sort(key=lambda p: p.p_vaddr)
+        
+        logger.debug("修复前的可加载段:")
+        for i, phdr in enumerate(load_segments):
+            logger.debug(f"  段{i}: vaddr=0x{phdr.p_vaddr:x}, offset=0x{phdr.p_offset:x}, "
+                        f"filesz=0x{phdr.p_filesz:x}, memsz=0x{phdr.p_memsz:x}")
+        
+        # 修复每个可加载段的大小
+        if load_segments:
+            for i in range(len(load_segments)):
+                phdr = load_segments[i]
+                
+                if i < len(load_segments) - 1:
+                    # 设置段大小到下一个段的开始
+                    next_phdr = load_segments[i + 1]
+                    phdr.p_memsz = next_phdr.p_vaddr - phdr.p_vaddr
+                    # 在内存转储中，文件大小等于内存大小
+                    phdr.p_filesz = phdr.p_memsz
+                else:
+                    # 最后一个段的处理 - 关键修复点
+                    calculated_size = self.file_size - phdr.p_vaddr
                     
-                    if i < len(load_segments) - 1:
-                        # 设置段大小到下一个段的开始
-                        next_phdr = load_segments[i + 1]
-                        phdr.p_memsz = next_phdr.p_vaddr - phdr.p_vaddr
-                        # 在内存转储中，文件大小等于内存大小
-                        phdr.p_filesz = phdr.p_memsz
+                    if calculated_size <= 0:
+                        # 对于自链接器文件，保持原有大小或使用合理的默认值
+                        logger.warning(f"检测到自链接器文件特征: file_size(0x{self.file_size:x}) <= vaddr(0x{phdr.p_vaddr:x})")
+                        self.is_self_link = True
+                        phdr.p_memsz = phdr.p_memsz
+                        logger.info(f"保持最后段原有大小: memsz=0x{phdr.p_memsz:x}")
                     else:
-                        # 最后一个段的处理 - 关键修复点
-                        calculated_size = self.file_size - phdr.p_vaddr
-                        
-                        if calculated_size <= 0:
-                            # 对于自链接器文件，保持原有大小或使用合理的默认值
-                            logger.warning(f"检测到自链接器文件特征: file_size(0x{self.file_size:x}) <= vaddr(0x{phdr.p_vaddr:x})")
-                            self.is_self_link = True
-                            phdr.p_memsz = phdr.p_memsz
-                            logger.info(f"保持最后段原有大小: memsz=0x{phdr.p_memsz:x}")
-                        else:
-                            phdr.p_memsz = calculated_size
-                            phdr.p_filesz = phdr.p_memsz
-                    
-                    logger.debug(f"修复段{i}大小: memsz=0x{phdr.p_memsz:x}, filesz=0x{phdr.p_filesz:x}")
+                        phdr.p_memsz = calculated_size
+                        phdr.p_filesz = phdr.p_memsz
+                
+                logger.debug(f"修复段{i}大小: memsz=0x{phdr.p_memsz:x}, filesz=0x{phdr.p_filesz:x}")
         
         # 第二阶段：统一设置所有程序头的偏移量 - 对应C++的第二部分逻辑
         logger.debug("设置所有程序头的偏移量:")

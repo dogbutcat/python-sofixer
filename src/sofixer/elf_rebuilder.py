@@ -168,7 +168,6 @@ class ELFRebuilder:
         dt_flags_count = 0
         dt_strsz_count = 0
         dt_syment_count = 0
-        dt_relent_count = 0
         dt_debug_count = 0
         dt_mips_rld_map_count = 0
         dt_mips_rld_version_count = 0
@@ -209,19 +208,18 @@ class ELFRebuilder:
             elif tag == DynamicTag.DT_PLTREL:
                 dt_pltrel_count += 1
                 self.so_info.plt_type = dyn.d_un.d_val
-                
+                logger.debug(f"plt_type (DT_PLTREL) found: {self.so_info.plt_type}")
             # 处理PLT重定位表 (对应C++ DT_JMPREL case)
             elif tag == DynamicTag.DT_JMPREL:
                 dt_jmprel_count += 1
-                self.so_info.plt_rel_offset = dyn.d_un.d_ptr - min_vaddr
-                logger.debug(f"plt_rel (DT_JMPREL) found at offset 0x{self.so_info.plt_rel_offset:x}")
+                self.so_info.plt_reloc_offset = dyn.d_un.d_ptr - min_vaddr
+                logger.debug(f"plt_reloc_offset (DT_JMPREL) found at offset 0x{self.so_info.plt_reloc_offset:x}")
                 
             # 处理PLT重定位表大小 (对应C++ DT_PLTRELSZ case)
             elif tag == DynamicTag.DT_PLTRELSZ:
                 dt_pltrelsz_count += 1
-                rel_size = ctypes.sizeof(self.elf_reader.types['Rel'])
-                self.so_info.plt_rel_count = dyn.d_un.d_val // rel_size
-                logger.debug(f"plt_rel_count (DT_PLTRELSZ) {self.so_info.plt_rel_count}")
+                self.so_info.plt_reloc_size = dyn.d_un.d_val
+                logger.debug(f"plt_reloc_size (DT_PLTRELSZ) {self.so_info.plt_reloc_size}")
                 
             # 处理普通重定位表 (对应C++ DT_REL case)
             elif tag == DynamicTag.DT_REL:
@@ -232,25 +230,21 @@ class ELFRebuilder:
             # 处理普通重定位表大小 (对应C++ DT_RELSZ case)
             elif tag == DynamicTag.DT_RELSZ:
                 dt_relsz_count += 1
-                rel_size = ctypes.sizeof(self.elf_reader.types['Rel'])
-                self.so_info.rel_count = dyn.d_un.d_val // rel_size
-                logger.debug(f"rel_count (DT_RELSZ) {self.so_info.rel_count}")
-                
+                self.so_info.rel_size = dyn.d_un.d_val
+                logger.debug(f"rel_size (DT_RELSZ) {self.so_info.rel_size}")
             # 处理PLT GOT表 (对应C++ DT_PLTGOT case)
             elif tag == DynamicTag.DT_PLTGOT:
                 dt_pltgot_count += 1
                 self.so_info.plt_got_offset = dyn.d_un.d_ptr - min_vaddr
-                
             # 处理RELA重定位表 (对应C++ DT_RELA case)
             elif tag == DynamicTag.DT_RELA:
                 dt_rela_count += 1
-                self.so_info.plt_rela_offset = dyn.d_un.d_ptr - min_vaddr
-                
+                self.so_info.rela_offset = dyn.d_un.d_ptr - min_vaddr
             # 处理RELA重定位表大小 (对应C++ DT_RELASZ case)
             elif tag == DynamicTag.DT_RELASZ:
                 dt_relasz_count += 1
-                rela_size = ctypes.sizeof(self.elf_reader.types['Rela'])
-                self.so_info.plt_rela_count = dyn.d_un.d_val // rela_size
+                self.so_info.rela_size = dyn.d_un.d_val
+                logger.debug(f"rela_size (DT_RELASZ) {self.so_info.rela_size}")
                 
             # 处理初始化函数 (对应C++ DT_INIT case)
             elif tag == DynamicTag.DT_INIT:
@@ -326,19 +320,19 @@ class ELFRebuilder:
             # 处理字符串表大小 (对应C++ DT_STRSZ case)
             elif tag == DynamicTag.DT_STRSZ:
                 dt_strsz_count += 1
-                self.so_info.strtabsize = dyn.d_un.d_val
+                self.so_info.strtab_size = dyn.d_un.d_val
                 
             # 处理符号条目大小 (对应C++ DT_SYMENT case)
             elif tag == DynamicTag.DT_SYMENT:
                 dt_syment_count += 1
-                # 这些条目不需要特殊处理，跳过继续处理下一个条目
-                pass
+                self.so_info.symtab_size = dyn.d_un.d_val
             # 处理重定位条目大小 (对应C++ DT_RELENT case)  
             elif tag == DynamicTag.DT_RELENT:
-                dt_relent_count += 1
-                # 对应C++中switch的break，意思是跳出当前case继续for循环
-                pass
-                
+                self.so_info.rel_ent = dyn.d_un.d_val
+                logger.debug(f"rel_ent (DT_RELENT) {self.so_info.rel_ent}")
+            elif tag == DynamicTag.DT_RELAENT:
+                self.so_info.rela_ent = dyn.d_un.d_val
+                logger.debug(f"rela_ent (DT_RELAENT) {self.so_info.rela_ent}")
             # 处理调试相关条目 (对应C++ DT_DEBUG case)
             elif tag == DynamicTag.DT_DEBUG:
                 dt_debug_count += 1
@@ -385,7 +379,25 @@ class ELFRebuilder:
                 # 未使用的条目 (对应C++ default case)
                 dt_unknown_count += 1
                 logger.debug(f"Unused DT entry: type 0x{tag:08x} arg 0x{dyn.d_un.d_val:08x}")
-        
+
+        # 计算.plt
+        if self.so_info.plt_type == DynamicTag.DT_REL:
+            rel_size = ctypes.sizeof(self.elf_reader.types['Rel'])
+        elif self.so_info.plt_type == DynamicTag.DT_RELA:
+            rel_size = ctypes.sizeof(self.elf_reader.types['Rela'])
+        else:
+            logger.warning(f"Unknown PLT type: {self.so_info.plt_type}")
+
+        self.so_info.plt_reloc_count = self.so_info.plt_reloc_size // rel_size
+
+        # 计算.rel.dyn/.rela.dyn 数量
+        if self.so_info.plt_type == DynamicTag.DT_REL:
+            self.so_info.rel_ent = self.so_info.rel_ent if self.so_info.rel_ent != 0 else ctypes.sizeof(self.elf_reader.types['Rel'])
+            self.so_info.rel_count = self.so_info.rel_size // self.so_info.rel_ent
+        elif self.so_info.plt_type == DynamicTag.DT_RELA:
+            self.so_info.rela_ent = self.so_info.rela_ent if self.so_info.rela_ent != 0 else ctypes.sizeof(self.elf_reader.types['Rela'])
+            self.so_info.rela_count = self.so_info.rela_size // self.so_info.rela_ent
+
         # 输出DT标签统计结果
         logger.debug("===================DT Tags Statistics====================")
         logger.debug(f"DT_HASH: {dt_hash_count}, DT_STRTAB: {dt_strtab_count}, DT_SYMTAB: {dt_symtab_count}")
@@ -396,7 +408,7 @@ class ELFRebuilder:
         logger.debug(f"DT_INIT_ARRAYSZ: {dt_init_arraysz_count}, DT_FINI_ARRAY: {dt_fini_array_count}, DT_FINI_ARRAYSZ: {dt_fini_arraysz_count}")
         logger.debug(f"DT_PREINIT_ARRAY: {dt_preinit_array_count}, DT_PREINIT_ARRAYSZ: {dt_preinit_arraysz_count}")
         logger.debug(f"DT_TEXTREL: {dt_textrel_count}, DT_SYMBOLIC: {dt_symbolic_count}, DT_NEEDED: {dt_needed_count}")
-        logger.debug(f"DT_FLAGS: {dt_flags_count}, DT_STRSZ: {dt_strsz_count}, DT_SYMENT: {dt_syment_count}, DT_RELENT: {dt_relent_count}")
+        logger.debug(f"DT_FLAGS: {dt_flags_count}, DT_STRSZ: {dt_strsz_count}, DT_SYMENT: {dt_syment_count}")
         logger.debug(f"DT_MIPS_RLD_MAP: {dt_mips_rld_map_count}, DT_MIPS_RLD_VERSION: {dt_mips_rld_version_count}")
         logger.debug(f"DT_MIPS_FLAGS: {dt_mips_flags_count}, DT_MIPS_BASE_ADDRESS: {dt_mips_base_address_count}")
         logger.debug(f"DT_MIPS_UNREFEXTNO: {dt_mips_unrefextno_count}, DT_MIPS_SYMTABNO: {dt_mips_symtabno_count}")
@@ -544,7 +556,8 @@ class ELFRebuilder:
             
         try:
             # 计算符号表在loaded_data中的位置
-            sym_entry_size = ctypes.sizeof(self.elf_reader.types['Sym'])
+            sym_entry_size = self.so_info.symtab_size if self.so_info.symtab_size > 0 else ctypes.sizeof(self.elf_reader.types['Sym'])
+            self.so_info.symtab_size = sym_entry_size
             
             # 计算符号数量（通过哈希表的nchain或根据大小估算）
             if self.so_info.nchain > 0:
@@ -665,6 +678,19 @@ class ELFRebuilder:
         # 获取架构相关信息
         min_vaddr, max_vaddr, load_size = self.elf_reader.calculate_load_size()
         addr_size = 8 if self.elf_reader.is_64bit else 4
+
+        logger.debug(f"调试信息:")
+        logger.debug(f"  min_vaddr: 0x{min_vaddr:x}")
+        logger.debug(f"  dump_base_addr: 0x{self.elf_reader.dump_base_addr:x}")
+        logger.debug(f"  symtab_offset: 0x{self.so_info.symtab_offset:x}")
+        logger.debug(f"  计算的raw_vaddr: 0x{self.so_info.symtab_offset + min_vaddr:x}")
+
+        # 检查哪种方法是正确的
+        if min_vaddr == self.elf_reader.dump_base_addr:
+            logger.debug("min_vaddr == dump_base_addr，symtab_offset可能是相对偏移")
+        else:
+            logger.debug("min_vaddr != dump_base_addr，需要进一步分析")
+
         
         # 步骤1: 创建空段头 (对应C++ lines 48-52)
         # C++: Elf_Shdr shdr = {0}; - 全零初始化
@@ -701,7 +727,7 @@ class ELFRebuilder:
             shdr['sh_flags'] = 0x2  # SHF_ALLOC
             shdr['sh_addr'] = self.so_info.strtab_offset + min_vaddr
             shdr['sh_offset'] = shdr['sh_addr']
-            shdr['sh_size'] = self.so_info.strtabsize
+            shdr['sh_size'] = self.so_info.strtab_size
             shdr['sh_link'] = 0
             shdr['sh_info'] = 0
             shdr['sh_addralign'] = 1
@@ -752,17 +778,17 @@ class ELFRebuilder:
             logger.debug(f"Added .rel.dyn section at index {self.section_indices['RELDYN']}")
         
         # 步骤6: 重建.rela.dyn段 (对应C++ lines 154-174)
-        if self.so_info.plt_rela_offset > 0:
+        if self.so_info.rela_offset > 0:
             self.section_indices['RELADYN'] = len(self.section_headers)
             
             shdr = self._create_section_header()
             shdr['sh_name'] = self._add_section_name(".rela.dyn")
             shdr['sh_type'] = SectionType.SHT_RELA
             shdr['sh_flags'] = 0x2  # SHF_ALLOC
-            shdr['sh_addr'] = self.so_info.plt_rela_offset + min_vaddr
+            shdr['sh_addr'] = self.so_info.rela_offset + min_vaddr
             shdr['sh_offset'] = shdr['sh_addr']
             rela_size = ctypes.sizeof(self.elf_reader.types['Rela'])
-            shdr['sh_size'] = self.so_info.plt_rela_count * rela_size
+            shdr['sh_size'] = self.so_info.rela_count * rela_size
             shdr['sh_link'] = self.section_indices['DYNSYM']
             shdr['sh_info'] = 0
             shdr['sh_addralign'] = addr_size
@@ -772,7 +798,7 @@ class ELFRebuilder:
             logger.debug(f"Added .rela.dyn section at index {self.section_indices['RELADYN']}")
         
         # 步骤7: 重建.rel.plt/.rela.plt段 (对应C++ lines 175-208)
-        if self.so_info.plt_rel_offset > 0:
+        if self.so_info.plt_reloc_offset > 0:
             self.section_indices['RELPLT'] = len(self.section_headers)
             
             shdr = self._create_section_header()
@@ -785,11 +811,12 @@ class ELFRebuilder:
                 shdr['sh_type'] = SectionType.SHT_RELA
                 rel_size = ctypes.sizeof(self.elf_reader.types['Rela'])
                 
-            shdr['sh_type'] = SectionType.SHT_REL # calculated plt_rel_count from plt_type as DT_REL
+            # this line is from c++ location, but I think it's not right
+            # shdr['sh_type'] = SectionType.SHT_REL
             shdr['sh_flags'] = 0x2  # SHF_ALLOC
-            shdr['sh_addr'] = self.so_info.plt_rel_offset + min_vaddr
+            shdr['sh_addr'] = self.so_info.plt_reloc_offset + min_vaddr
             shdr['sh_offset'] = shdr['sh_addr']
-            shdr['sh_size'] = self.so_info.plt_rel_count * rel_size
+            shdr['sh_size'] = self.so_info.plt_reloc_count * rel_size
             shdr['sh_link'] = self.section_indices['DYNSYM']
             shdr['sh_info'] = 0
             shdr['sh_addralign'] = addr_size
@@ -799,7 +826,7 @@ class ELFRebuilder:
             logger.debug(f"Added plt relocation section at index {self.section_indices['RELPLT']}")
         
         # 步骤8: 重建.plt段 (对应C++ lines 210-231)
-        if self.so_info.plt_rel_offset > 0:
+        if self.so_info.plt_reloc_offset > 0:
             self.section_indices['PLT'] = len(self.section_headers)
             
             shdr = self._create_section_header()
@@ -816,7 +843,7 @@ class ELFRebuilder:
                 
             shdr['sh_offset'] = shdr['sh_addr']
             # PLT大小估算：20字节基础代码 + 12字节每个条目
-            shdr['sh_size'] = 20 + 12 * self.so_info.plt_rel_count
+            shdr['sh_size'] = 20 + 12 * self.so_info.plt_reloc_count
             shdr['sh_link'] = 0
             shdr['sh_info'] = 0
             shdr['sh_addralign'] = 16 if self.elf_reader.is_64bit else 4  # 64-bit: 16-byte, 32-bit: 4-byte alignment
@@ -826,7 +853,7 @@ class ELFRebuilder:
             logger.debug(f"Added .plt section at index {self.section_indices['PLT']}")
         
         # 步骤9: 重建.text&ARM.extab段 (对应C++ lines 233-258)
-        if self.so_info.plt_rel_offset > 0:
+        if self.so_info.plt_reloc_offset > 0:
             self.section_indices['TEXTTAB'] = len(self.section_headers)
             
             shdr = self._create_section_header()
@@ -1173,18 +1200,18 @@ class ELFRebuilder:
         total_relocations = 0
         if hasattr(self.so_info, 'rel_count'):
             total_relocations += self.so_info.rel_count
-        if hasattr(self.so_info, 'plt_rel_count'):
-            total_relocations += self.so_info.plt_rel_count  
-        if hasattr(self.so_info, 'plt_rela_count'):
-            total_relocations += self.so_info.plt_rela_count
+        if hasattr(self.so_info, 'rela_count'):
+            total_relocations += self.so_info.rela_count
+        if hasattr(self.so_info, 'plt_reloc_count'):
+            total_relocations += self.so_info.plt_reloc_count
         logger.debug(f"  Total relocations to process: {total_relocations}")
         
         if hasattr(self.so_info, 'rel_count') and self.so_info.rel_count > 0:
             logger.debug(f"  .rel.dyn: {self.so_info.rel_count} entries at offset 0x{self.so_info.rel_offset:x}")
-        if hasattr(self.so_info, 'plt_rel_count') and self.so_info.plt_rel_count > 0:
-            logger.debug(f"  .rel.plt: {self.so_info.plt_rel_count} entries at offset 0x{self.so_info.plt_rel_offset:x}")
-        if hasattr(self.so_info, 'plt_rela_count') and self.so_info.plt_rela_count > 0:
-            logger.debug(f"  .rela.plt: {self.so_info.plt_rela_count} entries at offset 0x{self.so_info.plt_rela_offset:x}")
+        if hasattr(self.so_info, 'rela_count') and self.so_info.rela_count > 0:
+            logger.debug(f"  .rela.dyn: {self.so_info.rela_count} entries at offset 0x{self.so_info.rela_offset:x}")
+        if hasattr(self.so_info, 'plt_reloc_count') and self.so_info.plt_reloc_count > 0:
+            logger.debug(f"  .rela.plt: {self.so_info.plt_reloc_count} entries at offset 0x{self.so_info.plt_reloc_offset:x}")
         
         # 外部符号指针计数器（对应C++的external_pointer）
         self.external_pointer = 0
@@ -1197,37 +1224,31 @@ class ELFRebuilder:
                 # 处理.rel.dyn段的重定位
                 if self.so_info.rel_count > 0 and self.so_info.rel_offset > 0:
                     logger.debug(f"Processing {self.so_info.rel_count} .rel.dyn relocations")
-                    if not self._process_rel_relocations(
+                    if not self._process_relocations(
                         self.so_info.rel_offset, self.so_info.rel_count, 
                         min_vaddr, addr_size, False):
                         return False
-                
-                # 处理.rel.plt段的重定位
-                if self.so_info.plt_rel_count > 0 and self.so_info.plt_rel_offset > 0:
-                    logger.debug(f"Processing {self.so_info.plt_rel_count} .rel.plt relocations")
-                    if not self._process_rel_relocations(
-                        self.so_info.plt_rel_offset, self.so_info.plt_rel_count,
-                        min_vaddr, addr_size, False):
-                        return False
-                        
+
             else:
                 logger.debug("Processing RELA format relocations")
                 
                 # 处理RELA格式的重定位（主要用于64位架构）
-                if self.so_info.plt_rela_count > 0 and self.so_info.plt_rela_offset > 0:
-                    logger.debug(f"Processing {self.so_info.plt_rela_count} RELA relocations")
-                    if not self._process_rel_relocations(
-                        self.so_info.plt_rela_offset, self.so_info.plt_rela_count,
+                if self.so_info.rela_count > 0 and self.so_info.rela_offset > 0:
+                    logger.debug(f"Processing {self.so_info.rela_count} RELA relocations")
+                    if not self._process_relocations(
+                        self.so_info.rela_offset, self.so_info.rela_count,
                         min_vaddr, addr_size, True):
                         return False
                 
-                # 处理PLT RELA重定位
-                if self.so_info.plt_rel_count > 0 and self.so_info.plt_rel_offset > 0:
-                    logger.debug(f"Processing {self.so_info.plt_rel_count} PLT RELA relocations")
-                    if not self._process_rel_relocations(
-                        self.so_info.plt_rel_offset, self.so_info.plt_rel_count,
-                        min_vaddr, addr_size, True):
-                        return False
+            # 处理PLT RELA/REL重定位
+            if self.so_info.plt_reloc_count > 0 and self.so_info.plt_reloc_offset > 0:
+                logger.debug(f"Processing {self.so_info.plt_reloc_count} {'.rel.plt' if self.so_info.plt_type == DynamicTag.DT_REL else '.rela.plt'} relocations")
+                if not self._process_relocations(
+                    self.so_info.plt_reloc_offset, self.so_info.plt_reloc_count,
+                    min_vaddr, addr_size, True):
+                    return False
+
+            self.repair_got_plt_section()
             
             logger.debug("=======================RebuildRelocs End=========================")
             logger.info("Relocations rebuilt successfully")
@@ -1237,7 +1258,7 @@ class ELFRebuilder:
             logger.error(f"Failed to rebuild relocations: {e}")
             return False
     
-    def _process_rel_relocations(self, rel_offset: int, rel_count: int, 
+    def _process_relocations(self, rel_offset: int, rel_count: int, 
                                 min_vaddr: int, addr_size: int, is_rela: bool) -> bool:
         """
         处理重定位表中的所有条目
@@ -1466,51 +1487,63 @@ class ELFRebuilder:
             format_str = '<Q' if addr_size == 8 else '<L'  # 小端格式
             current_value = struct.unpack(format_str, 
                 self.elf_reader.loaded_data[target_offset:target_offset + addr_size])[0]
+
+            # ========= Fix：正确处理addend =========
+            if is_rela:
+                # RELA格式：addend来自重定位表
+                addend = rel_entry.r_addend
+                logger.debug(f"RELA format: using explicit addend=0x{addend:x}")
+            else:
+                # REL格式：addend就是目标位置的当前值
+                addend = current_value
+                logger.debug(f"REL format: using implicit addend=0x{addend:x} (current_value)")
             
             # 根据重定位类型处理
-            new_value = current_value
+            new_value = 0
             
             # R_ARM_RELATIVE 或 R_386_RELATIVE - 相对重定位（最常见）
             if rel_type in [RelocationARM.R_ARM_RELATIVE, RelocationI386.R_386_RELATIVE]:
                 # 核心转换：绝对地址 → 相对地址
-                # 对应C++的：*prel = *prel - dump_base
-                new_value = current_value - self.elf_reader.dump_base_addr
-                logger.debug(f"RELATIVE relocation: 0x{current_value:x} -> 0x{new_value:x}")
+                # RELA: new_value = addend - dump_base_addr
+                # REL:  new_value = current_value - dump_base_addr
+                new_value = addend - self.elf_reader.dump_base_addr
+                logger.debug(f"RELATIVE relocation: addend=0x{addend:x} -> 0x{new_value:x}")
                 
             # R_AARCH64_ABS64 - ARM64架构的64位绝对地址重定位（类型0x101）
             elif rel_type == 0x101:
                 # ARM64 (AArch64) 64位绝对地址重定位
-                # 这种重定位类型在ARM64架构中用于处理64位绝对地址
-                # 处理方式与相对重定位相同：从内存转储的绝对地址转换为相对地址
-                new_value = current_value - self.elf_reader.dump_base_addr
-                logger.debug(f"ARM64_ABS64 relocation (0x101): 0x{current_value:x} -> 0x{new_value:x}")
-                logger.debug(f"  ARM64 architecture detected, applying absolute->relative conversion")
+                new_value = addend - self.elf_reader.dump_base_addr
+                logger.debug(f"ARM64_ABS64 relocation (0x101): addend=0x{addend:x} -> 0x{new_value:x}")
                 
             # 符号重定位（类型0x402）
             elif rel_type == 0x402:
                 if sym_index < len(self.so_info.symbol_table):
                     symbol = self.so_info.symbol_table[sym_index]
                     if symbol.st_value != 0:
-                        new_value = symbol.st_value
+                        # 符号重定位的公式通常是：symbol_value + addend
+                        new_value = symbol.st_value + addend
                     else:
                         # 未定义符号分配外部指针空间
                         load_size = self.elf_reader.calculate_load_size()[2]
-                        new_value = load_size + self.external_pointer
+                        new_value = load_size + self.external_pointer + addend
                         self.external_pointer += addr_size
-                    logger.debug(f"SYMBOL relocation: sym_idx={sym_index}, value=0x{new_value:x}")
+                    logger.debug(f"SYMBOL relocation: sym_idx={sym_index}, symbol=0x{symbol.st_value:x}, "
+                                f"addend=0x{addend:x}, result=0x{new_value:x}")
                 else:
                     logger.warning(f"Invalid symbol index {sym_index}")
                     return False
-            
-            # RELA格式的加数处理（类型0x403）
-            elif rel_type == 0x403 and is_rela:
-                new_value = rel_entry.r_addend
+
+            # 其他重定位类型...
+            elif rel_type == 0x403:
+                # 这种类型可能就是直接使用addend
+                new_value = addend
                 logger.debug(f"ADDEND relocation: value=0x{new_value:x}")
-            
+
             else:
                 # 未知的重定位类型，记录但不失败
-                logger.debug(f"Unhandled relocation type: 0x{rel_type:x}")
-                return True
+                logger.debug(f"Unhandled relocation type: 0x{rel_type:x}, using addend=0x{addend:x}")
+                new_value = addend  # 默认情况下使用addend值
+
             
             # 将新值写回loaded_data
             # 对应C++的：*prel = new_value
@@ -1799,3 +1832,177 @@ class ELFRebuilder:
         except Exception as e:
             logger.error(f"Failed to update program header table: {e}")
             return False
+
+    def repair_got_plt_section(self):
+        """
+        修复.got.plt段
+        
+        .got.plt段包含：
+        - got.plt[0]: _DYNAMIC段地址 
+        - got.plt[1]: 链接器标识符(通常为0)
+        - got.plt[2]: _dl_runtime_resolve函数地址
+        - got.plt[3+]: 函数地址表项（初始指向PLT中的解析代码）
+        """
+        if not hasattr(self.so_info, 'plt_got_offset') or self.so_info.plt_got_offset == 0:
+            logger.warning("No .got.plt section information available")
+            return False
+            
+        try:
+            # 计算.got.plt在loaded_data中的偏移
+            got_plt_file_offset = self.elf_reader.virtual_addr_to_loaded_offset(
+                self.so_info.plt_got_offset
+            )
+            
+            if got_plt_file_offset is None:
+                logger.error(f"Cannot map .got.plt virtual address 0x{self.so_info.plt_got_offset:x}")
+                return False
+            
+            addr_size = 8 if self.elf_reader.is_64bit else 4
+            logger.info(f"Repairing .got.plt section:")
+            logger.info(f"  Virtual address: 0x{self.so_info.plt_got_offset:x}")
+            logger.info(f"  File offset: 0x{got_plt_file_offset:x}")
+            
+            # ===== 修复got.plt[0]: _DYNAMIC段地址 =====
+            dynamic_addr = self._find_dynamic_section_addr()
+            if dynamic_addr:
+                # 转换为文件相对地址
+                relative_dynamic = dynamic_addr - self.elf_reader.dump_base_addr
+                self._write_got_entry(got_plt_file_offset, 0, relative_dynamic, addr_size)
+                logger.debug(f"  got.plt[0] = 0x{relative_dynamic:x} (_DYNAMIC)")
+            else:
+                logger.warning("  Could not find _DYNAMIC section, setting got.plt[0] = 0")
+                self._write_got_entry(got_plt_file_offset, 0, 0, addr_size)
+            
+            # ===== 修复got.plt[1]: 链接器标识符 =====
+            # 通常设置为0，某些情况下可能指向link_map结构
+            self._write_got_entry(got_plt_file_offset, 1, 0, addr_size)
+            logger.debug(f"  got.plt[1] = 0x0 (link_map)")
+            
+            # ===== 修复got.plt[2]: _dl_runtime_resolve函数地址 =====
+            # 在静态修复中，通常设置为0或者指向PLT[0]的第二条指令
+            plt_resolver_addr = self._get_plt_resolver_addr()
+            if plt_resolver_addr:
+                relative_resolver = plt_resolver_addr - self.elf_reader.dump_base_addr
+                self._write_got_entry(got_plt_file_offset, 2, relative_resolver, addr_size)
+                logger.debug(f"  got.plt[2] = 0x{relative_resolver:x} (resolver)")
+            else:
+                self._write_got_entry(got_plt_file_offset, 2, 0, addr_size)
+                logger.debug(f"  got.plt[2] = 0x0 (resolver not found)")
+            
+            # ===== 修复got.plt[3+]: 函数地址表项 =====
+            self._repair_got_plt_function_entries(got_plt_file_offset, addr_size)
+            
+            logger.info("✓ .got.plt section repair completed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to repair .got.plt section: {e}")
+            return False
+
+    def _write_got_entry(self, got_plt_offset: int, index: int, value: int, addr_size: int):
+        """写入GOT.PLT表项"""
+        entry_offset = got_plt_offset + (index * addr_size)
+        format_str = '<Q' if addr_size == 8 else '<L'
+        
+        # 边界检查
+        if entry_offset + addr_size > len(self.elf_reader.loaded_data):
+            logger.error(f"GOT.PLT entry {index} extends beyond loaded_data")
+            return False
+            
+        packed_value = struct.pack(format_str, value)
+        self.elf_reader.loaded_data[entry_offset:entry_offset + addr_size] = packed_value
+        return True
+
+    def _find_dynamic_section_addr(self) -> int:
+        """查找_DYNAMIC段的虚拟地址"""
+        try:
+            for shdr in self.elf_reader.section_headers:
+                if hasattr(shdr, 'sh_name') and shdr.sh_name == '.dynamic':
+                    return shdr.sh_addr
+                    
+            return None
+        except:
+            return None
+
+    def _get_plt_resolver_addr(self) -> int:
+        """获取PLT解析器地址（通常是PLT[0]的位置）"""
+        try:
+            for shdr in self.elf_reader.section_headers:
+                if hasattr(shdr, 'sh_name') and shdr.sh_name == '.plt':
+                    return shdr.sh_addr
+                    
+            return None
+        except:
+            return None
+
+    def _repair_got_plt_function_entries(self, got_plt_offset: int, addr_size: int):
+        """
+        修复.got.plt中的函数地址表项
+        
+        在延迟绑定中，这些条目初始应该指向对应PLT条目中的解析代码
+        """
+        try:
+            # 计算函数表项的数量
+            # 这可以从重定位表中的PLT相关条目数量推算
+            plt_reloc_count = self.so_info.plt_reloc_count
+            
+            logger.debug(f"Repairing {plt_reloc_count} function entries in .got.plt")
+            
+            # 获取.plt段的起始地址
+            plt_base_addr = self._get_plt_base_addr()
+            if not plt_base_addr:
+                logger.warning("Cannot find .plt section base address")
+                return
+            
+            # 修复每个函数条目
+            for i in range(plt_reloc_count):
+                entry_index = 3 + i  # 跳过前3个保留条目
+                
+                # 计算对应的PLT条目地址
+                # 通常PLT[0]是解析器，PLT[1+]是函数条目
+                # 每个PLT条目通常16字节（x86_64）或12字节（x86）
+                plt_entry_size = 16 if self.elf_reader.is_64bit else 12
+                plt_entry_addr = plt_base_addr + ((i + 1) * plt_entry_size)
+                
+                # PLT条目的第6字节开始是push指令，GOT应该初始指向这里
+                plt_push_addr = plt_entry_addr + 6
+                
+                # 转换为相对地址
+                relative_addr = plt_push_addr - self.elf_reader.dump_base_addr
+                
+                # 写入GOT表项
+                self._write_got_entry(got_plt_offset, entry_index, relative_addr, addr_size)
+                
+                logger.debug(f"  got.plt[{entry_index}] = 0x{relative_addr:x} (PLT[{i+1}]+6)")
+                
+        except Exception as e:
+            logger.error(f"Failed to repair GOT.PLT function entries: {e}")
+
+    def _get_plt_base_addr(self) -> int:
+        """获取.plt段的基地址"""
+        try:
+            if hasattr(self.so_info, 'plt_reloc_offset'):
+                return self.so_info.plt_reloc_offset
+                
+            for shdr in self.elf_reader.section_headers:
+                if hasattr(shdr, 'sh_name') and shdr.sh_name == '.plt':
+                    return shdr.sh_addr
+            return None
+        except:
+            return None
+
+    # 在主修复流程中调用
+    # def repair_dynamic_sections(self):
+    #     """修复动态链接相关段"""
+    #     logger.info("=== Repairing dynamic linking sections ===")
+        
+    #     # 1. 先处理重定位表（你现有的代码）
+    #     self._process_all_relocations()
+        
+    #     # 2. 修复.got.plt段
+    #     self.repair_got_plt_section()
+        
+    #     # 3. 如果需要，还可以修复.plt段本身
+    #     # self.repair_plt_section()
+        
+    #     logger.info("=== Dynamic sections repair completed ===")

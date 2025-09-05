@@ -516,43 +516,51 @@ class SoInfo:
     
     def __init__(self):
         """Initialize soinfo with default values"""
-        # Basic SO information
-        self.name = "name"                           # const char* name
-        self.phnum = 0                               # size_t phnum
-        self.entry = 0                               # Elf_Addr entry
-        self.size = 0                               # unsigned size
+        # --- 基本信息 ---
+        self.name = ""              # const char* name
+        self.phnum = 0              # size_t phnum
+        self.entry = 0              # Elf_Addr entry
+        self.size = 0               # unsigned size
+        self.load_bias = 0          # Elf_Addr load_bias
         
-        # Dynamic section information
-        self.dynamic_count = 0                       # size_t dynamic_count
-        self.dynamic_flags = 0                       # Elf_Word dynamic_flags
+        # --- 动态节 ---
+        self.dynamic_offset = 0     # .dynamic section offset
+        self.dynamic_count = 0      # Number of entries in .dynamic
         
-        # String and symbol tables (stored as offsets, not pointers)
-        self.strtab_offset = 0                       # Offset in loaded_data
-        self.symtab_offset = 0                       # Offset in loaded_data
+        # --- 字符串表和符号表 ---
+        self.strtab_offset = 0      # .dynstr offset
+        self.strtab_size = 0        # .dynstr size
+        self.symtab_offset = 0      # .dynsym offset
+        self.symtab_size = 0        # .dynsym size
+
+        # --- 哈希表 (SYSV_HASH) ---
+        self.hash_offset = 0        # .hash offset (nbucket, nchain, bucket, chain)
+        self.nbucket = 0
+        self.nchain = 0
+        self.bucket_offset = 0      # Offset in loaded_data
+        self.chain_offset = 0       # Offset in loaded_data
         
-        # Hash table information
-        self.strtabsize = 0                          # size_t strtabsize
-        self.nbucket = 0                             # size_t nbucket
-        self.nchain = 0                              # size_t nchain
-        self.hash_offset = 0                         # Hash table start offset in loaded_data (对应C++的si.hash)
-        self.bucket_offset = 0                       # Offset in loaded_data
-        self.chain_offset = 0                        # Offset in loaded_data
+        # --- PLT/GOT ---
+        self.plt_got_offset = 0     # .got.plt offset
         
-        # PLT GOT (stored as offset)
-        self.plt_got_offset = 0                      # Offset in loaded_data
+        # --- 重定位信息 ---
+        # PLT 重定位: 根据 plt_type 决定使用 rel 还是 rela
+        self.plt_type = 0           # 从 DT_PLTREL 读取, 值为 DT_REL 或 DT_RELA
+        self.plt_reloc_offset = 0   # .rel.plt 或 .rela.plt 的偏移量
+        self.plt_reloc_size = 0     # .rel.plt 或 .rela.plt 的大小
+        self.plt_reloc_count = 0    # .rel.plt 或 .rela.plt 的条目数
+
+        # 动态数据重定位
+        self.rel_offset = 0         # .rel.dyn offset
+        self.rel_size = 0           # .rel.dyn size
+        self.rel_ent = 0            # .rel.dyn ent
+        self.rel_count = 0          # .rel.dyn count
+        self.rela_offset = 0        # .rela.dyn offset
+        self.rela_size = 0          # .rela.dyn size
+        self.rela_ent = 0           # .rela.dyn ent
+        self.rela_count = 0         # .rela.dyn count
         
-        # PLT relocation information (stored as offsets)
-        self.plt_type = 0                            # uint32_t plt_type
-        self.plt_rel_offset = 0                      # Offset in loaded_data
-        self.plt_rel_count = 0                       # size_t plt_rel_count
-        self.plt_rela_offset = 0                     # Offset in loaded_data
-        self.plt_rela_count = 0                      # size_t plt_rela_count
-        
-        # Regular relocation information (stored as offsets)
-        self.rel_offset = 0                          # Offset in loaded_data
-        self.rel_count = 0                           # size_t rel_count
-        
-        # Initialization arrays (stored as offsets)
+        # --- 初始化/终止函数数组 ---
         self.preinit_array_offset = 0                # Offset in loaded_data
         self.preinit_array_count = 0                 # size_t preinit_array_count
         self.init_array_offset = 0                   # Offset in loaded_data
@@ -560,11 +568,11 @@ class SoInfo:
         self.fini_array_offset = 0                   # Offset in loaded_data
         self.fini_array_count = 0                    # size_t fini_array_count
         
-        # Init/fini functions (stored as offsets)
+        # --- .init 和 .fini 函数 (已废弃但仍需兼容) ---
         self.init_func_offset = 0                    # Offset in loaded_data
         self.fini_func_offset = 0                    # Offset in loaded_data
         
-        # ARM EABI section for stack unwinding
+        # --- 架构特定字段 ---
         self.ARM_exidx_offset = 0                    # Offset in loaded_data
         self.ARM_exidx_count = 0                     # size_t ARM_exidx_count
         
@@ -573,51 +581,16 @@ class SoInfo:
         self.mips_local_gotno = 0                    # unsigned mips_local_gotno
         self.mips_gotsym = 0                         # unsigned mips_gotsym
         
-        # Relocation flags
-        self.has_text_relocations = False            # bool has_text_relocations
-        self.has_DT_SYMBOLIC = False                 # bool has_DT_SYMBOLIC
+        # --- 标志位 ---
+        self.flags = 0
+        self.has_text_relocations = False
+        self.has_DT_SYMBOLIC = False
         
         # Symbol table for relocation processing
         self.symbol_table = []                       # List of symbol entries
         self.min_load = None
         self.max_load = None
         self.unused1 = 0
-        self.dynamic = None
-        self.dynamic_count = 0
-        self.dynamic_flags = 0
         self.unused2 = 0
         self.unused3 = 0
-        self.flags = 0
-        self.strtab = None
-        self.symtab = None
-        self.hash = None
-        self.strtabsize = 0
-        self.nbucket = 0
-        self.nchain = 0
-        self.bucket = None
-        self.chain = None
-        self.plt_got = None
-        self.plt_type = 17  # DT_REL
-        self.plt_rel = None
-        self.plt_rel_count = 0
-        self.plt_rela = None
-        self.plt_rela_count = 0
-        self.rel = None
-        self.rel_count = 0
-        self.preinit_array = None
-        self.preinit_array_count = 0
-        self.init_array = None
-        self.init_array_count = 0
-        self.fini_array = None
-        self.fini_array_count = 0
-        self.init_func = None
-        self.fini_func = None
-        self.ARM_exidx = None
-        self.ARM_exidx_count = 0
-        self.mips_symtabno = 0
-        self.mips_local_gotno = 0
-        self.mips_gotsym = 0
-        self.load_bias = None
-        self.has_text_relocations = False
-        self.has_DT_SYMBOLIC = False
-        self.pad_size = 0  # 动态段填充大小，对应C++的pad_size_
+        self.pad_size = 0  # 动态段填充大小

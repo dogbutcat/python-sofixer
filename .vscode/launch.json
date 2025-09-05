@@ -7,9 +7,28 @@
             "request": "launch",
             "module": "src.sofixer.main",
             "args": [
-                "-s", "debug/samples/libjiagu_64.so_0x7a1301e000_0x27e000.so",
-                "-o", "debug/output/libjiagu_fixed_debug.so",
-                "-m", "0x7a1301e000",
+                "-s", "debug/samples/libjiagu_64.so_0x7c17af5000_0x274000.so",
+                "-o", "debug/output/libjiagu_py_0x7c17af5000_fixed.so",
+                "-m", "0x7c17af5000",
+                "-d"
+            ],
+            "console": "internalConsole",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "stopOnEntry": false,
+            "python": "/usr/bin/python3"
+        },
+        {
+            "name": "SoFixer Debug - Basic 2",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.sofixer.main",
+            "args": [
+                "-s", "debug/samples/output_0x2e270.so",
+                "-o", "debug/output/output_0x2e270_fixed.so",
+                "-m", "0x798490a000",
                 "-d"
             ],
             "console": "internalConsole",
