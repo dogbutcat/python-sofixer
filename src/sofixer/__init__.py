@@ -26,11 +26,12 @@ __author__ = "F8LEFT (原始C++实现), Python移植版本"
 from .elf_reader import ELFReader, ObfuscatedELFReader
 from .elf_rebuilder import ELFRebuilder
 from .types import *
-from .main import main
+from .main import main, fix_so
 
 __all__ = [
     'ELFReader',
     'ObfuscatedELFReader', 
     'ELFRebuilder',
-    'main'
+    'main',
+    'fix_so',
 ]

@@ -12,6 +12,7 @@ Features:
 - Automatic 32/64-bit architecture detection
 - Memory-mapped file reading for performance
 - Complete ELF structure representation
+- Module API for programmatic usage with bytearray I/O
 
 Original C++ implementation by F8LEFT.
 Python ctypes port with binary accuracy and union support.
@@ -21,14 +22,39 @@ Modular Architecture:
 - elf_reader: ELF file reading and parsing classes  
 - elf_rebuilder: ELF file reconstruction and repair logic
 
-Usage:
+CLI Usage:
     python sofixer.py -s dumped.so -o fixed.so -m 0x7DB078B000 -d
+
+Module Usage:
+    import sofixer
+    
+    # Load dumped SO data
+    with open('dumped.so', 'rb') as f:
+        dumped_data = bytearray(f.read())
+    
+    # Optional: Load base SO data
+    with open('base.so', 'rb') as f:
+        base_data = bytearray(f.read())
+    
+    # Fix the SO file
+    fixed_data = sofixer.fix_so(
+        dumped_data=dumped_data,
+        dump_base_addr=0x7DB078B000,
+        base_so_data=base_data,  # Optional
+        debug=True
+    )
+    
+    if fixed_data:
+        with open('fixed.so', 'wb') as f:
+            f.write(fixed_data)
 """
 
 import sys
 import os
 import argparse
 import logging
+import tempfile
+from typing import Optional, Union
 
 # Import our modular components
 from .utils import setup_logging, parse_memory_address, detect_elf_architecture
@@ -37,6 +63,114 @@ from .elf_rebuilder import ELFRebuilder
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def fix_so(dumped_data: Union[bytes, bytearray], 
+           dump_base_addr: Union[int, str], 
+           base_so_data: Optional[Union[bytes, bytearray]] = None,
+           debug: bool = False) -> Optional[bytearray]:
+    """
+    Fix a dumped SO file data in memory.
+    
+    Args:
+        dumped_data: The dumped SO file data as bytes or bytearray
+        dump_base_addr: Memory base address where SO was dumped from (int or hex string)
+        base_so_data: Optional original SO file data for dynamic section recovery
+        debug: Enable debug logging
+        
+    Returns:
+        Fixed SO file data as bytearray, or None if fixing failed
+        
+    Example:
+        >>> with open('dumped.so', 'rb') as f:
+        ...     dumped = bytearray(f.read())
+        >>> fixed = fix_so(dumped, 0x7DB078B000)
+        >>> if fixed:
+        ...     with open('fixed.so', 'wb') as f:
+        ...         f.write(fixed)
+    """
+    # Setup logging for module usage only if no handlers exist
+    if debug and not logger.handlers:
+        setup_logging(True)
+    
+    try:
+        # Parse memory address if it's a string
+        if isinstance(dump_base_addr, str):
+            dump_base_addr = parse_memory_address(dump_base_addr)
+        
+        logger.info(f"Using dump base address: 0x{dump_base_addr:x}")
+        
+        # Convert input data to bytearray if needed
+        if isinstance(dumped_data, bytes):
+            dumped_data = bytearray(dumped_data)
+        
+        if base_so_data is not None and isinstance(base_so_data, bytes):
+            base_so_data = bytearray(base_so_data)
+        
+        # Create temporary files for the readers (they expect file paths)
+        with tempfile.NamedTemporaryFile(delete=False) as temp_dumped:
+            temp_dumped.write(dumped_data)
+            temp_dumped_path = temp_dumped.name
+        
+        temp_base_path = None
+        if base_so_data is not None:
+            with tempfile.NamedTemporaryFile(delete=False) as temp_base:
+                temp_base.write(base_so_data)
+                temp_base_path = temp_base.name
+        
+        try:
+            # Initialize obfuscated ELF reader
+            with ObfuscatedELFReader(temp_dumped_path) as elf_reader:
+                # Set parameters
+                elf_reader.set_dump_base_addr(dump_base_addr)
+                if temp_base_path:
+                    elf_reader.set_base_so_path(temp_base_path)
+                
+                # Load the ELF file
+                if not elf_reader.load():
+                    logger.error("Failed to load ELF file")
+                    return None
+                
+                # Initialize rebuilder
+                rebuilder = ELFRebuilder(elf_reader)
+                
+                # Rebuild the ELF file
+                if not rebuilder.rebuild():
+                    logger.error("Failed to rebuild ELF file")
+                    return None
+                
+                # Get rebuilt data
+                rebuilt_data = rebuilder.get_rebuilt_data()
+                if not rebuilt_data:
+                    logger.error("No rebuilt data available")
+                    return None
+                
+                logger.info(f"Successfully rebuilt SO file ({len(rebuilt_data)} bytes)")
+                
+                # Convert to bytearray and return
+                if isinstance(rebuilt_data, bytes):
+                    return bytearray(rebuilt_data)
+                else:
+                    return rebuilt_data
+        
+        finally:
+            # Clean up temporary files
+            try:
+                os.unlink(temp_dumped_path)
+                if temp_base_path:
+                    os.unlink(temp_base_path)
+            except OSError:
+                pass  # Ignore cleanup errors
+    
+    except ValueError as e:
+        logger.error(f"Invalid input: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to fix SO file: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
+        return None
 
 
 def main():
@@ -51,6 +185,21 @@ Examples:
   
   # With debug output and base SO file
   python sofixer.py -s dumped.so -o fixed.so -m 0x7DB078B000 -d -b original.so
+
+Module Usage:
+  import sofixer
+  
+  # Load data
+  with open('dumped.so', 'rb') as f:
+      dumped = bytearray(f.read())
+  
+  # Fix SO file
+  fixed = sofixer.fix_so(dumped, 0x7DB078B000, debug=True)
+  
+  # Save result
+  if fixed:
+      with open('fixed.so', 'wb') as f:
+          f.write(fixed)
         """
     )
     
@@ -143,7 +292,6 @@ Examples:
             import traceback
             traceback.print_exc()
         return 1
-
 
 if __name__ == '__main__':
     sys.exit(main())
