@@ -19,14 +19,14 @@ ELF文件重建工具的Python实现，专门用于修复从内存转储的共�
 - main: 命令行主程序
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "F8LEFT (原始C++实现), Python移植版本"
 
 # 导出主要类和函数
 from .elf_reader import ELFReader, ObfuscatedELFReader
 from .elf_rebuilder import ELFRebuilder
 from .types import *
-from .main import main, fix_so
+from .main import main, fix_so, fix_so_file
 
 __all__ = [
     'ELFReader',
@@ -34,4 +34,5 @@ __all__ = [
     'ELFRebuilder',
     'main',
     'fix_so',
+    'fix_so_file',
 ]

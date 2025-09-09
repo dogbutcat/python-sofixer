@@ -12,14 +12,14 @@ Features:
 - Automatic 32/64-bit architecture detection
 - Memory-mapped file reading for performance
 - Complete ELF structure representation
-- Module API for programmatic usage with bytearray I/O
+- Module API for programmatic usage with bytearray or file I/O
 
 Original C++ implementation by F8LEFT.
 Python ctypes port with binary accuracy and union support.
 
 Modular Architecture:
 - elf_utils: Utility functions and architecture detection
-- elf_reader: ELF file reading and parsing classes  
+- elf_reader: ELF file reading and parsing classes
 - elf_rebuilder: ELF file reconstruction and repair logic
 
 CLI Usage:
@@ -28,25 +28,23 @@ CLI Usage:
 Module Usage:
     import sofixer
     
-    # Load dumped SO data
+    # In-memory processing
     with open('dumped.so', 'rb') as f:
         dumped_data = bytearray(f.read())
     
-    # Optional: Load base SO data
-    with open('base.so', 'rb') as f:
-        base_data = bytearray(f.read())
-    
-    # Fix the SO file
     fixed_data = sofixer.fix_so(
         dumped_data=dumped_data,
         dump_base_addr=0x7DB078B000,
-        base_so_data=base_data,  # Optional
         debug=True
     )
     
-    if fixed_data:
-        with open('fixed.so', 'wb') as f:
-            f.write(fixed_data)
+    # File-based processing
+    success = sofixer.fix_so_file(
+        dumped_path='dumped.so',
+        output_path='fixed.so',
+        dump_base_addr=0x7DB078B000,
+        debug=True
+    )
 """
 
 import sys
@@ -160,7 +158,7 @@ def fix_so(dumped_data: Union[bytes, bytearray],
                 if temp_base_path:
                     os.unlink(temp_base_path)
             except OSError:
-                pass  # Ignore cleanup errors
+                pass # Ignore cleanup errors
     
     except ValueError as e:
         logger.error(f"Invalid input: {e}")
@@ -171,6 +169,80 @@ def fix_so(dumped_data: Union[bytes, bytearray],
             import traceback
             traceback.print_exc()
         return None
+
+
+def fix_so_file(dumped_path: str,
+                 output_path: str,
+                 dump_base_addr: Union[int, str],
+                 base_so_path: Optional[str] = None,
+                 debug: bool = False) -> bool:
+    """
+    Fix a dumped SO file from a file path and write the result to another file.
+
+    This is a file-based wrapper around the fix_so function.
+
+    Args:
+        dumped_path: Path to the dumped SO file.
+        output_path: Path to write the fixed SO file.
+        dump_base_addr: Memory base address where SO was dumped from (int or hex string).
+        base_so_path: Optional path to the original SO file for dynamic section recovery.
+        debug: Enable debug logging.
+
+    Returns:
+        True if the file was fixed and written successfully, False otherwise.
+    """
+    # Setup logging for module usage only if no handlers exist
+    if debug and not logger.handlers:
+        setup_logging(True)
+
+    try:
+        # Validate input files
+        if not os.path.isfile(dumped_path):
+            logger.error(f"Source file not found: {dumped_path}")
+            return False
+        if base_so_path and not os.path.isfile(base_so_path):
+            logger.error(f"Base SO file not found: {base_so_path}")
+            return False
+
+        # Read data from files
+        logger.info(f"Reading dumped SO from: {dumped_path}")
+        with open(dumped_path, 'rb') as f:
+            dumped_data = bytearray(f.read())
+
+        base_so_data = None
+        if base_so_path:
+            logger.info(f"Reading base SO from: {base_so_path}")
+            with open(base_so_path, 'rb') as f:
+                base_so_data = bytearray(f.read())
+
+        # Call the core fixing function
+        fixed_data = fix_so(
+            dumped_data=dumped_data,
+            dump_base_addr=dump_base_addr,
+            base_so_data=base_so_data,
+            debug=debug
+        )
+
+        # Write the output file
+        if fixed_data:
+            logger.info(f"Writing fixed SO to: {output_path}")
+            with open(output_path, 'wb') as f:
+                f.write(fixed_data)
+            logger.info(f"Successfully wrote {len(fixed_data)} bytes to {output_path}")
+            return True
+        else:
+            logger.error(f"Failed to fix SO file from {dumped_path}")
+            return False
+
+    except (IOError, OSError) as e:
+        logger.error(f"File operation failed: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred in fix_so_file: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
+        return False
 
 
 def main():
@@ -189,30 +261,31 @@ Examples:
 Module Usage:
   import sofixer
   
-  # Load data
+  # Method 1: Direct bytearray processing
   with open('dumped.so', 'rb') as f:
       dumped = bytearray(f.read())
-  
-  # Fix SO file
   fixed = sofixer.fix_so(dumped, 0x7DB078B000, debug=True)
   
-  # Save result
-  if fixed:
-      with open('fixed.so', 'wb') as f:
-          f.write(fixed)
+  # Method 2: File path processing
+  success = sofixer.fix_so_file(
+      dumped_path='dumped.so',
+      output_path='fixed.so', 
+      dump_base_addr=0x7DB078B000,
+      debug=True
+  )
         """
     )
     
     parser.add_argument('-s', '--source', required=True,
-                       help='Source dumped SO file path')
+                        help='Source dumped SO file path')
     parser.add_argument('-o', '--output', required=True,
-                       help='Output fixed SO file path')
+                        help='Output fixed SO file path')
     parser.add_argument('-m', '--memso', required=True,
-                       help='Memory base address where SO was dumped from')
+                        help='Memory base address where SO was dumped from')
     parser.add_argument('-b', '--baseso',
-                       help='Original SO file path (for dynamic section recovery)')
+                        help='Original SO file path (for dynamic section recovery)')
     parser.add_argument('-d', '--debug', action='store_true',
-                       help='Enable debug output')
+                        help='Enable debug output')
     
     args = parser.parse_args()
     

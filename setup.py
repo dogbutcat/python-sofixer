@@ -34,13 +34,13 @@ def read_requirements():
 
 setup(
     name="sofixer",
-    version="1.0.0",
+    version="1.1.0",
     author="F8LEFT (原始C++), Python移植版本",
     author_email="",
     description="ELF文件重建工具 - 修复从内存转储的共享库文件",
     long_description=read_long_description(),
     long_description_content_type="text/markdown",
-    url="https://github.com/F8LEFT/SoFixer",
+    url="https://github.com/dogbutcat/python-sofixer",
     
     # 包配置
     package_dir={"": "src"},
