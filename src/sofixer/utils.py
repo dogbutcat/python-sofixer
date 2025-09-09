@@ -17,29 +17,34 @@ from typing import Optional
 from .types import *
 
 
+# =============================================================================
+# ELF架构检测和类型选择
+# =============================================================================
+
 def detect_elf_architecture(file_path: str) -> Optional[str]:
     """
-    Automatically detect if an ELF file is 32-bit or 64-bit.
+    自动检测ELF文件是32位还是64位架构
     
     Args:
-        file_path: Path to the ELF file
+        file_path: ELF文件路径
         
     Returns:
-        "32" for 32-bit, "64" for 64-bit, None if not valid ELF or error
+        "32" 表示32位，"64" 表示64位，None表示无效ELF或错误
     """
     try:
         with open(file_path, 'rb') as f:
-            # Read ELF header identification
+            # 读取ELF标识信息（前16字节）
             e_ident = f.read(16)
             
-            # Check ELF magic number
+            # 检查ELF魔数
             if len(e_ident) < 16 or e_ident[:4] != b'\x7fELF':
                 return None
                 
             # Check ELF class (32-bit or 64-bit)
-            if e_ident[4] == ELFClass.ELFCLASS32:
+            elf_class = e_ident[4]
+            if elf_class == ELFClass.ELFCLASS32:
                 return "32"
-            elif e_ident[4] == ELFClass.ELFCLASS64:
+            elif elf_class == ELFClass.ELFCLASS64:
                 return "64"
             else:
                 return None
@@ -50,13 +55,13 @@ def detect_elf_architecture(file_path: str) -> Optional[str]:
 
 def get_elf_types(is_64bit: bool):
     """
-    Get the appropriate ctypes structures for the ELF architecture.
+    根据ELF架构获取相应的ctypes结构类型
     
     Args:
-        is_64bit: True for 64-bit, False for 32-bit
+        is_64bit: True表示64位，False表示32位
         
     Returns:
-        Dictionary containing all ELF structure types for the architecture
+        包含所有ELF结构类型的字典
     """
     if is_64bit:
         return {

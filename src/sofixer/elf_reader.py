@@ -24,6 +24,7 @@ import ctypes
 import mmap
 import logging
 import struct
+from .utils import detect_elf_architecture, get_elf_types
 from typing import Optional, List
 
 # 导入所有ELF类型定义
@@ -31,87 +32,6 @@ from .types import *
 
 # 配置日志
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# ELF架构检测和类型选择
-# =============================================================================
-
-def detect_elf_architecture(file_path: str) -> Optional[str]:
-    """
-    自动检测ELF文件是32位还是64位架构
-    
-    Args:
-        file_path: ELF文件路径
-        
-    Returns:
-        "32" 表示32位，"64" 表示64位，None表示无效ELF或错误
-    """
-    try:
-        with open(file_path, 'rb') as f:
-            # 读取ELF标识信息（前16字节）
-            e_ident = f.read(16)
-            
-            # 检查ELF魔数
-            if len(e_ident) < 5 or e_ident[:4] != b'\x7fELF':
-                return None
-                
-            # 第5个字节（索引4）指示架构类型
-            # 1 = 32位，2 = 64位
-            elf_class = e_ident[4]
-            if elf_class == 1:
-                return "32"
-            elif elf_class == 2:
-                return "64"
-            else:
-                return None
-                
-    except (IOError, OSError):
-        return None
-
-
-def get_elf_types(is_64bit: bool):
-    """
-    根据ELF架构获取相应的ctypes结构类型
-    
-    Args:
-        is_64bit: True表示64位，False表示32位
-        
-    Returns:
-        包含所有ELF结构类型的字典
-    """
-    if is_64bit:
-        return {
-            'Ehdr': Elf64_Ehdr,
-            'Phdr': Elf64_Phdr,
-            'Shdr': Elf64_Shdr,
-            'Dyn': Elf64_Dyn,
-            'Sym': Elf64_Sym,
-            'Rel': Elf64_Rel,
-            'Rela': Elf64_Rela,
-            'auxv_t': Elf64_auxv_t,
-            'Addr': Elf64_Addr,
-            'Off': Elf64_Off,
-            'Word': Elf64_Word,
-            'Half': Elf64_Half,
-            'Xword': Elf64_Xword,
-        }
-    else:
-        return {
-            'Ehdr': Elf32_Ehdr,
-            'Phdr': Elf32_Phdr,
-            'Shdr': Elf32_Shdr,
-            'Dyn': Elf32_Dyn,
-            'Sym': Elf32_Sym,
-            'Rel': Elf32_Rel,
-            'Rela': Elf32_Rela,
-            'auxv_t': Elf32_auxv_t,
-            'Addr': Elf32_Addr,
-            'Off': Elf32_Off,
-            'Word': Elf32_Word,
-            'Half': Elf32_Half,
-            'Xword': Elf32_Xword,
-        }
-
 
 # =============================================================================
 # 内存映射ELF文件读取器
